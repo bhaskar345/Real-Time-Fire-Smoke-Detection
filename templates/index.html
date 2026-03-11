@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>🔥Fire & Smoke Detection</title>
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+	<style>
+		#canvasWrapper {
+		position: relative;
+		max-width: 100%;
+		width: 640px;
+		aspect-ratio: 4/3;
+		}
+		#video, #canvas {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		}
+	</style>
+</head>
+<body class="bg-light">
+
+	<div class="container py-5">
+	<div class="row justify-content-center">
+		<div class="col-lg-8 text-center">
+
+		<h2 class="mb-4">🔥 Real-Time Fire & Smoke Detection</h2>
+
+		<!-- Controls -->
+		<div class="mb-4 d-flex flex-column flex-md-row justify-content-center align-items-center gap-3">
+			<button class="btn btn-primary" id="toggleCameraBtn">📷 Enable Camera</button>
+			<input type="file" id="imageInput" accept="image/*" class="form-control" style="max-width: 300px;">
+			<button class="btn btn-success" onclick="downloadImage()" style="display: none;" id="download-annotated">Download Annotated Image</button>
+		</div>
+
+		<!-- Counters -->
+		<div class="mb-3" id="counters">
+		<span class="badge text-bg-danger mx-2">
+			🔥 Fire: <span id="fireCount">0</span>
+			| Confidence: <span id="fireConf">0%</span>
+		</span>
+		<span class="badge text-bg-secondary mx-2">
+			💨 Smoke: <span id="smokeCount">0</span>
+			| Confidence: <span id="smokeConf">0%</span>
+		</span>
+		<span class="badge text-bg-success mx-2">
+			✅ Other: <span id="otherCount">0</span>
+			| Confidence: <span id="otherConf">0%</span>
+		</span>
+		</div>
+
+
+		<!-- Canvas + Video -->
+		<div class="d-flex justify-content-center">
+			<div id="canvasWrapper" class="border rounded shadow bg-white">
+			<video id="video" autoplay muted style="display:none;"></video>
+			<canvas id="canvas"></canvas>
+			</div>
+		</div>
+		<button id="switchCameraBtn" class="btn btn-secondary mt-2" style="display: none;">🔄 Switch Camera</button>
+
+	<div class="mt-2 text-start" id="detFeedBox" style="display: none">
+	<h5>🧠 Detections:</h5>
+	</div>
+
+	<!--<div id="detectionFeed" style="max-height: 400px; overflow-y: auto; border: 1px solid #ccc; padding: 10px;"></div>-->
+	<div id="detectionFeed"
+		style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd;
+				padding: 8px; background-color: #000; color: white; display: none;">
+	</div>
+
+		</div>
+	</div>
+	</div>
+
+	<script>
+	const imageInput = document.getElementById('imageInput');
+	const video = document.getElementById('video');
+	const canvas = document.getElementById('canvas');
+	const ctx = canvas.getContext('2d');
+	canvas.width = 640;
+	canvas.height = 640;
+	const fireCount = document.getElementById('fireCount');
+	const smokeCount = document.getElementById('smokeCount');
+	const otherCount = document.getElementById('otherCount');
+	let fs_url;
+	let wfs_url;
+    let isWebcam = false;
+    let useBackCamera = true;
+    let currentStream = null;
+    let socket = null;
+
+	document.getElementById('switchCameraBtn').addEventListener('click', () => {
+		useBackCamera = !useBackCamera;
+		stopCurrentStream();
+		enableWebcam(); // Re-enable with new facingMode
+	});
+
+	function stopCurrentStream() {
+	if (currentStream) {
+		currentStream.getTracks().forEach(track => track.stop());
+	}
+	}
+    
+    const toggleCameraBtn = document.getElementById('toggleCameraBtn');
+    
+    toggleCameraBtn.addEventListener('click', () => {
+      if (isWebcam) {
+        disableWebcam();
+      } else {
+        enableWebcam();
+      }
+    });
+    
+    function enableWebcam() {
+      	isWebcam = true;
+      	toggleCameraBtn.textContent = "🚫 Disable Camera";
+      	document.getElementById("detectionFeed").style.display = "block";
+      	document.getElementById("detFeedBox").style.display = "block";
+		document.getElementById("switchCameraBtn").style.display = "inline-block";
+		document.getElementById("download-annotated").style.display = "none";
+
+      const constraints = {
+        video: {
+          facingMode: useBackCamera ? { exact: "environment" } : "user"
+        }
+      };
+    
+      navigator.mediaDevices.getUserMedia(constraints)
+        .then(stream => {
+          currentStream = stream;
+          video.srcObject = stream;
+          video.style.display = 'block';
+          canvas.width = 640;
+          canvas.height = 640;
+          setupWebSocket();
+        })
+        .catch(err => {
+          alert("Could not access Camera. try switching camera..");
+		  fallbackToFrontCamera();
+          isWebcam = false;
+        //   toggleCameraBtn.textContent = "📷 Enable Camera";
+        });
+    }
+
+	function fallbackToFrontCamera() {
+		navigator.mediaDevices.getUserMedia({ video: true })
+			.then(stream => {
+			video.srcObject = stream;
+			setupWebSocket();
+		})
+		.catch(err => alert("Could not access any webcam."));
+	}
+   
+    function disableWebcam() {
+      isWebcam = false;
+      toggleCameraBtn.textContent = "📷 Enable Camera";
+    
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close();
+      }
+    
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+    
+      	video.srcObject = null;
+      	video.style.display = 'none';
+      	document.getElementById("detectionFeed").style.display = "none";
+      	document.getElementById("detFeedBox").style.display = "none";
+		document.getElementById("switchCameraBtn").style.display = "none";
+
+		const ctx = canvas.getContext("2d");
+  		ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    }
+
+
+	function stopCurrentStream() {
+	if (currentStream) {
+		currentStream.getTracks().forEach(track => track.stop());
+	}
+	}
+
+
+	// === Load Image from File ===
+	imageInput.addEventListener('change', async (e) => {
+		isWebcam = false;
+		disableWebcam();
+		document.getElementById("detectionFeed").style.display = "none";
+		document.getElementById("detFeedBox").style.display = "none";
+		document.getElementById("counters").style.display = "block";
+		document.getElementById("download-annotated").style.display = "none";
+		document.getElementById("switchCameraBtn").style.display = "none";
+		const file = e.target.files[0];
+	if (!file) return;
+
+	const reader = new FileReader();
+	reader.onload = async function () {
+		const img = new Image();
+		img.onload = async () => {
+
+		let targetWidth = 640;
+		let targetHeight = 640;
+
+		// Resize using offscreen canvas
+		const resizedCanvas = document.createElement('canvas');
+		resizedCanvas.width = targetWidth;
+		resizedCanvas.height = targetHeight;
+		const resizedCtx = resizedCanvas.getContext('2d');
+		resizedCtx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+		// Set main canvas to resized dimensions
+		canvas.width = targetWidth;
+		canvas.height = targetHeight;
+		ctx.drawImage(resizedCanvas, 0, 0);
+
+		const base64Resized = resizedCanvas.toDataURL('image/jpeg');
+		sendImageToBackend(base64Resized);
+		};
+		img.src = reader.result;
+	};
+	reader.readAsDataURL(file);
+	});
+
+
+	// === WebSocket Communication ===
+	function setupWebSocket() {
+		socket = new WebSocket("/ws");
+			socket.onopen = () => {
+			captureLoop();
+		};
+
+		socket.onmessage = (event) => {
+			const data = JSON.parse(event.data);
+			drawBoxes(data.detections);
+		};
+
+		socket.onerror = (err) => {
+		console.error("WebSocket error:", err);
+		};
+
+		socket.onclose = (event) => {
+		setTimeout(setupWebSocket, 2000);
+		};
+	};
+
+	// === Capture webcam frame every 500ms ===
+	function captureLoop() {
+		if (!isWebcam || socket.readyState !== WebSocket.OPEN) return;
+		const tempCanvas = document.createElement('canvas');
+		tempCanvas.width = canvas.width;
+		tempCanvas.height = canvas.height;
+		const tempCtx = tempCanvas.getContext('2d');
+		tempCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
+		const base64 = tempCanvas.toDataURL('image/jpeg', 0.4);
+		// console.log(Image size:, ${Math.round(base64.length * 3 / 4 / 1024)} KB`);
+		socket.send(JSON.stringify({action:"message", image: base64 }));
+		setTimeout(captureLoop, 250);
+	}
+
+	// === Send uploaded image to backend ===
+	async function sendImageToBackend(base64Image) {
+		const res = await fetch("/upload_frame", {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({action:"message", image: base64Image })
+		});
+		const result = await res.json();
+		drawBoxes(result.detections);
+		document.getElementById("download-annotated").style.display = "block";
+	}
+
+	const STREAK_REQUIRED = 10;
+	const frameHistory = []; // Holds sets of labels per frame
+	let lastInsertedLabels = new Set();
+
+	function drawBoxes(detections) {
+		if (isWebcam) {
+			ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+		}
+
+		const currentLabels = new Set();
+		let conf;
+		let fireDetections = [];
+		let smokeDetections = [];
+		let otherDetections = [];
+
+		detections.forEach((det) => {
+			const cls = det.label;
+			conf = det.conf ?? det.confidence ?? 0;
+			currentLabels.add(cls);
+
+			if (cls === 'fire') fireDetections.push(conf);
+			else if (cls === 'smoke') smokeDetections.push(conf);
+			else otherDetections.push(conf);
+
+			// === Color logic
+			let color = 'green';
+			if (cls === 'fire') color = 'red';
+			else if (cls === 'smoke') color = 'white';
+
+			// === Draw box
+			ctx.beginPath();
+			ctx.rect(det.x1, det.y1, det.x2 - det.x1, det.y2 - det.y1);
+			ctx.strokeStyle = color;
+			ctx.lineWidth = 2;
+			ctx.stroke();
+
+			ctx.fillStyle = color;
+			ctx.font = '16px sans-serif';
+			ctx.fillText(`${cls} (${(conf * 100).toFixed(1)}%)`, det.x1, det.y1 - 8);
+		});
+
+		// Update counts and confidence
+		fireCount.textContent = fireDetections.length;
+		smokeCount.textContent = smokeDetections.length;
+		otherCount.textContent = otherDetections.length;
+
+		fireConf.textContent = fireDetections.length > 0 ? `${(average(fireDetections) * 100).toFixed(1)}%` : "0%";
+		smokeConf.textContent = smokeDetections.length > 0 ? `${(average(smokeDetections) * 100).toFixed(1)}%` : "0%";
+		otherConf.textContent = otherDetections.length > 0 ? `${(average(otherDetections) * 100).toFixed(1)}%` : "0%";
+
+		if (isWebcam){
+			// === Track labels for this frame
+			frameHistory.push(currentLabels);
+			if (frameHistory.length > STREAK_REQUIRED) {
+				frameHistory.shift();
+			}
+
+			// === Count how many frames each label appears in
+			const labelCounts = {};
+			frameHistory.forEach((labelSet) => {
+				labelSet.forEach((label) => {
+				labelCounts[label] = (labelCounts[label] || 0) + 1;
+				});
+			});
+
+		// === Insert to feed if label appeared in ALL 10 frames
+			Object.entries(labelCounts).forEach(([label, count]) => {
+				if (count === STREAK_REQUIRED) {
+				let color = 'green';
+				if (label === 'fire') color = 'red';
+				else if (label === 'smoke') color = 'white';
+
+				insertToDetectionFeed(label, conf, color);
+
+				// ✅ Reset the count by removing the label from all frameHistory
+				frameHistory.forEach(labelSet => labelSet.delete(label));
+				}
+
+				// Remove from lastInsertedLabels if no longer streaking
+				if (count < STREAK_REQUIRED && lastInsertedLabels.has(label)) {
+				lastInsertedLabels.delete(label);
+				}
+			});
+			};
+	};
+
+	function insertToDetectionFeed(label, conf, color) {
+		const feed = document.getElementById("detectionFeed");
+
+		// Create snapshot from the current canvas
+		const snapshotURL = canvas.toDataURL('image/png');
+		const timestamp = new Date().toLocaleTimeString().replace(/:/g, '-');
+
+		const item = document.createElement("div");
+		item.style.padding = "8px";
+		item.style.border = `1px solid ${color}`;
+		item.style.marginBottom = "10px";
+		item.style.background = "rgba(26, 26, 26, 0.7)";
+		item.style.color = color;
+		item.style.borderRadius = "8px";
+
+		item.innerHTML = `
+			<strong>${label.toUpperCase()}</strong> – <span>${(conf * 100).toFixed(1)}%</span><br>
+			<small>[${timestamp.replace(/-/g, ':')}]</small><br>
+			<img src="${snapshotURL}" alt="Detection Snapshot" style="margin-top: 6px; max-width: 100%; width: 140px; border-radius: 4px; display: block;" />
+			<a href="${snapshotURL}" download="detection_${label}_${timestamp}.png"
+			style="display: inline-block; margin-top: 6px; color: ${color}; text-decoration: underline;">
+			📥 Download Annotated Image
+			</a>
+		`;
+
+		feed.prepend(item);
+	};
+
+	function average(arr) {
+		if (arr.length === 0) return 0;
+		return arr.reduce((sum, val) => sum + val, 0) / arr.length;
+	}
+
+	// === Download Annotated Image ===
+	function downloadImage() {
+		const link = document.createElement('a');
+		link.download = 'annotated_detection.png';
+		link.href = canvas.toDataURL('image/png');
+		link.click();
+	}
+
+	</script>
+
+</body>
+</html>
+
