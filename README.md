@@ -55,8 +55,8 @@ Make sure you have the following installed:
 ### 1. Clone or Download the Project
 
 ```bash
-git clone https://github.com/your-username/fire-smoke-detection.git
-cd fire-smoke-detection
+git clone https://github.com/bhaskar345/Real-Time-Fire-Smoke-Detection
+cd cd Real-Time-Fire-Smoke-Detection
 ```
 
 Or simply download and extract the ZIP, then navigate to the folder.
