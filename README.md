@@ -56,7 +56,7 @@ Make sure you have the following installed:
 
 ```bash
 git clone https://github.com/bhaskar345/Real-Time-Fire-Smoke-Detection
-cd cd Real-Time-Fire-Smoke-Detection
+cd Real-Time-Fire-Smoke-Detection
 ```
 
 Or simply download and extract the ZIP, then navigate to the folder.
