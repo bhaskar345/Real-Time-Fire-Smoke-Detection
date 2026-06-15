@@ -8,6 +8,6 @@ yolov5
 fastapi
 uvicorn[standard]
 onnxruntime
-opencv-python
+opencv-python-headless
 streamlit
 streamlit-webrtc
