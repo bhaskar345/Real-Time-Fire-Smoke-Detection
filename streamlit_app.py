@@ -2,10 +2,8 @@ import streamlit as st
 import cv2
 import numpy as np
 import onnxruntime as ort
-import torch
 import time
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
-from yolov5.utils.general import non_max_suppression
 from collections import defaultdict
 
 class_counter = defaultdict(int)
@@ -30,14 +28,10 @@ class_names = ['fire', 'other', 'smoke']
 
 
 def detect_objects(frame):
-    """
-    Run ONNX inference on frame
-    """
 
     original_h, original_w = frame.shape[:2]
 
     img = cv2.resize(frame, (640, 640))
-
     img = img.astype(np.float32) / 255.0
     img = np.transpose(img, (2, 0, 1))
     img = np.expand_dims(img, axis=0)
@@ -47,36 +41,74 @@ def detect_objects(frame):
         {input_name: img}
     )[0]
 
-    preds = torch.tensor(outputs)
+    predictions = outputs[0]
 
-    preds = non_max_suppression(
-        preds,
-        conf_thres=0.5,
-        iou_thres=0.5
+    boxes = []
+    scores = []
+    class_ids = []
+
+    conf_threshold = 0.5
+
+    for pred in predictions:
+
+        obj_conf = pred[4]
+
+        if obj_conf < conf_threshold:
+            continue
+
+        class_scores = pred[5:]
+        class_id = np.argmax(class_scores)
+
+        score = obj_conf * class_scores[class_id]
+
+        if score < conf_threshold:
+            continue
+
+        xc, yc, w, h = pred[:4]
+
+        x1 = xc - w / 2
+        y1 = yc - h / 2
+
+        boxes.append([
+            int(x1),
+            int(y1),
+            int(w),
+            int(h)
+        ])
+
+        scores.append(float(score))
+        class_ids.append(int(class_id))
+
+    indices = cv2.dnn.NMSBoxes(
+        boxes,
+        scores,
+        score_threshold=conf_threshold,
+        nms_threshold=0.5
     )
 
     detections = []
 
-    if len(preds) > 0:
-        for det in preds[0]:
+    if len(indices) > 0:
 
-            x1, y1, x2, y2, conf, cls = det[:6]
+        for idx in indices.flatten():
+
+            x, y, w, h = boxes[idx]
 
             x_scale = original_w / 640
             y_scale = original_h / 640
 
-            x1 = int(x1 * x_scale)
-            y1 = int(y1 * y_scale)
-            x2 = int(x2 * x_scale)
-            y2 = int(y2 * y_scale)
+            x1 = int(x * x_scale)
+            y1 = int(y * y_scale)
+
+            x2 = int((x + w) * x_scale)
+            y2 = int((y + h) * y_scale)
 
             detections.append({
                 "box": [x1, y1, x2, y2],
-                "conf": float(conf),
-                "class_id": int(cls),
-                "label": class_names[int(cls)]
+                "conf": scores[idx],
+                "class_id": class_ids[idx],
+                "label": class_names[class_ids[idx]]
             })
-            print(class_names[int(cls)])
 
     return detections
 
@@ -124,18 +156,10 @@ class VideoProcessor(VideoTransformerBase):
 
             label = det["label"]
 
-            # Skip until seen in 10 consecutive frames
             if self.class_counter[label] < THRESHOLD:
                 continue
 
-            # Log only once
             if label not in self.logged_classes:
-
-                print(
-                    f"ALERT: {label} detected "
-                    f"{THRESHOLD} consecutive frames"
-                )
-
                 self.logged_classes.add(label)
 
             x1, y1, x2, y2 = det["box"]

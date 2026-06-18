@@ -1,13 +1,6 @@
-torch==2.1.0+cpu
-torchvision==0.16.0+cpu
---extra-index-url https://download.pytorch.org/whl/cpu
-Pillow
-numpy==1.24.4
-ultralytics
-yolov5
-fastapi
-uvicorn[standard]
-onnxruntime
-opencv-python-headless==4.10.0.84
 streamlit
 streamlit-webrtc
+numpy==1.24.4
+opencv-python-headless==4.11.0.86
+onnxruntime==1.23.2
+Pillow
