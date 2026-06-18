@@ -84,7 +84,10 @@ class VideoProcessor(VideoTransformerBase):
 
     def __init__(self):
         self.last_inference_time = 0
-        self.latest_result = None
+        self.latest_result = []
+
+        self.class_counter = defaultdict(int)
+        self.logged_classes = set()
 
     def transform(self, frame):
 
@@ -92,26 +95,57 @@ class VideoProcessor(VideoTransformerBase):
 
         current_time = time.time()
 
-        # Run inference only every 0.25 sec (4 FPS)
         if current_time - self.last_inference_time >= 0.25:
 
             self.last_inference_time = current_time
 
             detections = detect_objects(img)
-
             self.latest_result = detections
 
+            current_classes = {
+                det["label"]
+                for det in detections
+            }
+
+            for cls in class_names:
+
+                if cls in current_classes:
+                    self.class_counter[cls] += 1
+                else:
+                    self.class_counter[cls] = 0
+
+                    if cls in self.logged_classes:
+                        self.logged_classes.remove(cls)
+
         else:
-            detections = self.latest_result or []
+            detections = self.latest_result
 
         for det in detections:
 
+            label = det["label"]
+
+            # Skip until seen in 10 consecutive frames
+            if self.class_counter[label] < THRESHOLD:
+                continue
+
+            # Log only once
+            if label not in self.logged_classes:
+
+                print(
+                    f"ALERT: {label} detected "
+                    f"{THRESHOLD} consecutive frames"
+                )
+
+                self.logged_classes.add(label)
+
             x1, y1, x2, y2 = det["box"]
 
-            label = det["label"]
-            color = CLASS_COLORS.get(label, (0, 255, 0))
+            color = CLASS_COLORS[label]
 
-            text = f"{label} {det['conf']:.2f}"
+            text = (
+                f"{label} "
+                f"{det['conf']:.2f}"
+            )
 
             (text_w, text_h), _ = cv2.getTextSize(
                 text,
@@ -136,7 +170,11 @@ class VideoProcessor(VideoTransformerBase):
                 -1
             )
 
-            font_color = (0, 0, 0) if label == "smoke" else (255, 255, 255)
+            font_color = (
+                (0, 0, 0)
+                if label == "smoke"
+                else (255, 255, 255)
+            )
 
             cv2.putText(
                 img,
@@ -149,7 +187,6 @@ class VideoProcessor(VideoTransformerBase):
             )
 
         return img
-
 
 st.markdown("""
 <style>
